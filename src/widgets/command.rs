@@ -522,7 +522,7 @@ mod test {
             env: None,
             cwd: None,
             follow_focus_cwd: false,
-            interval: 1,
+            interval: 5,
             render_mode: RenderMode::Static,
             click_action: "".to_owned(),
             hide_on_empty_stdout: false,
@@ -554,7 +554,7 @@ mod test {
 
     #[rstest]
     // no result, interval 1 second
-    #[case(1, &ZellijState::default(), true)]
+    #[case(1, &ZellijState{ plugin_uuid: "test_command_result_1".to_owned(), ..Default::default() }, true)]
     // only run once without a result
     #[case(0, &ZellijState::default(), true)]
     // do not run with run once and result
@@ -608,5 +608,7 @@ mod test {
             state,
         );
         assert_eq!(res, expected);
+
+        release_command_lock(&state, "test");
     }
 }

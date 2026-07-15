@@ -2,4 +2,4 @@
 target = "wasm32-wasip1"
 
 [target.wasm32-wasip1]
-runner = ["wasmtime", "--dir", "./target::target"]
+runner = ["wasmtime", "--dir", "./target::target", "--dir", "/tmp"]
