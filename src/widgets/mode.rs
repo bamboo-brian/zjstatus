@@ -23,6 +23,9 @@ pub struct ModeWidget {
     prompt_format: Vec<FormattedPart>,
     tmux_format: Vec<FormattedPart>,
     default_to_mode: Option<String>,
+    nested_ascended_format: Vec<FormattedPart>,
+    nested_dimmed_format: Vec<FormattedPart>,
+    nested_active_format: Vec<FormattedPart>,
 }
 
 impl ModeWidget {
@@ -99,6 +102,21 @@ impl ModeWidget {
 
         let default_to_mode = config.get("mode_default_to_mode").map(|s| s.to_string());
 
+        let nested_ascended_format = match config.get("mode_nested_ascended") {
+            Some(form) => FormattedPart::multiple_from_format_string(form, config),
+            None => vec![],
+        };
+
+        let nested_dimmed_format = match config.get("mode_nested_dimmed") {
+            Some(form) => FormattedPart::multiple_from_format_string(form, config),
+            None => vec![],
+        };
+
+        let nested_active_format = match config.get("mode_nested_active") {
+            Some(form) => FormattedPart::multiple_from_format_string(form, config),
+            None => vec![],
+        };
+
         Self {
             normal_format,
             locked_format,
@@ -115,28 +133,68 @@ impl ModeWidget {
             prompt_format,
             tmux_format,
             default_to_mode,
+            nested_ascended_format,
+            nested_dimmed_format,
+            nested_active_format,
         }
     }
-}
 
-impl Widget for ModeWidget {
-    fn process(&self, _name: &str, state: &ZellijState) -> String {
+    fn nested_format_for(&self, state: &ZellijState) -> Option<&Vec<FormattedPart>> {
+        if state.mode.session_ascended.unwrap_or(false) && !self.nested_ascended_format.is_empty()
+        {
+            Some(&self.nested_ascended_format)
+        } else if state.mode.session_dimmed.unwrap_or(false)
+            && !self.nested_dimmed_format.is_empty()
+        {
+            Some(&self.nested_dimmed_format)
+        } else if !state.mode.session_ancestry.is_empty() && !self.nested_active_format.is_empty()
+        {
+            Some(&self.nested_active_format)
+        } else {
+            None
+        }
+    }
+
+    fn render_regular_format(&self, state: &ZellijState, mode_name: &str) -> String {
         self.select_format(state.mode.mode)
             .iter()
             .map(|f| {
-                let mut content = f.content.clone();
-
-                if f.content.contains("{name}") {
-                    content = f
-                        .content
-                        .replace("{name}", format!("{:?}", state.mode.mode).as_str());
-                }
+                let content = if f.content.contains("{name}") {
+                    f.content.replace("{name}", mode_name)
+                } else {
+                    f.content.clone()
+                };
 
                 (f, content)
             })
             .fold("".to_owned(), |acc, (f, content)| {
                 format!("{acc}{}", f.format_string(&content))
             })
+    }
+}
+
+impl Widget for ModeWidget {
+    fn process(&self, _name: &str, state: &ZellijState) -> String {
+        let mode_name = format!("{:?}", state.mode.mode);
+        let regular_format = self.render_regular_format(state, &mode_name);
+
+        let Some(format) = self.nested_format_for(state) else {
+            return regular_format;
+        };
+
+        format.iter().fold("".to_owned(), |acc, f| {
+            let mut content = f.content.clone();
+
+            if content.contains("{name}") {
+                content = content.replace("{name}", &mode_name);
+            }
+
+            if content.contains("{mode}") {
+                content = content.replace("{mode}", &regular_format);
+            }
+
+            format!("{acc}{}", f.format_string(&content))
+        })
     }
 
     fn process_click(&self, _name: &str, _state: &ZellijState, _pos: usize) {}
@@ -204,5 +262,219 @@ fn map_string_to_mode(s: &str) -> Option<InputMode> {
         "prompt" => Some(InputMode::Prompt),
         "tmux" => Some(InputMode::Tmux),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::BTreeMap;
+
+    use zellij_tile::prelude::ModeInfo;
+
+    use crate::{config::ZellijState, widgets::widget::Widget};
+
+    use super::ModeWidget;
+
+    fn state_with_mode(mode: ModeInfo) -> ZellijState {
+        ZellijState {
+            mode,
+            ..ZellijState::default()
+        }
+    }
+
+    #[test]
+    pub fn test_regular_format_used_when_not_nested() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_ascended".to_owned(), "(bg) {mode}".to_owned()),
+            ("mode_nested_dimmed".to_owned(), "(dim) {mode}".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo::default());
+
+        assert_eq!(widget.process("mode", &state), "Normal");
+    }
+
+    #[test]
+    pub fn test_nested_ascended_format_replaces_regular_format() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_ascended".to_owned(), "(bg) {mode}".to_owned()),
+            ("mode_nested_dimmed".to_owned(), "(dim) {mode}".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_ascended: Some(true),
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "(bg) Normal");
+    }
+
+    #[test]
+    pub fn test_nested_dimmed_format_replaces_regular_format() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_ascended".to_owned(), "(bg) {mode}".to_owned()),
+            ("mode_nested_dimmed".to_owned(), "(dim) {mode}".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "(dim) Normal");
+    }
+
+    #[test]
+    pub fn test_nested_ascended_takes_precedence_over_dimmed() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_ascended".to_owned(), "bg".to_owned()),
+            ("mode_nested_dimmed".to_owned(), "dim".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_ascended: Some(true),
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "bg");
+    }
+
+    #[test]
+    pub fn test_nested_falls_back_to_regular_format_when_unconfigured() {
+        let config = BTreeMap::from([("mode_normal".to_owned(), "{name}".to_owned())]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "Normal");
+    }
+
+    #[test]
+    pub fn test_nested_name_placeholder_takes_wrapper_styling() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "#[fg=1]{name}".to_owned()),
+            (
+                "mode_nested_dimmed".to_owned(),
+                "#[fg=3,bold]{name}".to_owned(),
+            ),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        let output = widget.process("mode", &state);
+        let regular_output = widget.render_regular_format(&state, "Normal");
+
+        assert!(output.contains("Normal"));
+        assert_ne!(
+            output, regular_output,
+            "{{name}} should be styled by the nested wrapper, not by mode_normal"
+        );
+    }
+
+    #[test]
+    pub fn test_nested_mode_placeholder_embeds_whole_regular_format() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "#[fg=1]{name}".to_owned()),
+            (
+                "mode_nested_dimmed".to_owned(),
+                "(dim) {mode}".to_owned(),
+            ),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        let output = widget.process("mode", &state);
+        let regular_output = widget.render_regular_format(&state, "Normal");
+
+        assert_eq!(output, format!("(dim) {regular_output}"));
+    }
+
+    #[test]
+    pub fn test_nested_format_can_use_both_name_and_mode_placeholders() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "#[fg=1]{name}".to_owned()),
+            (
+                "mode_nested_dimmed".to_owned(),
+                "{name}: {mode}".to_owned(),
+            ),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        let output = widget.process("mode", &state);
+        let regular_output = widget.render_regular_format(&state, "Normal");
+
+        assert_eq!(output, format!("Normal: {regular_output}"));
+    }
+
+    #[test]
+    pub fn test_nested_active_used_when_ancestry_present_and_not_ascended_or_dimmed() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_active".to_owned(), "(active) {mode}".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_ancestry: vec!["host-session".to_owned()],
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "(active) Normal");
+    }
+
+    #[test]
+    pub fn test_nested_active_not_used_without_ancestry() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_active".to_owned(), "(active) {mode}".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo::default());
+
+        assert_eq!(widget.process("mode", &state), "Normal");
+    }
+
+    #[test]
+    pub fn test_nested_ascended_and_dimmed_take_precedence_over_active() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_ascended".to_owned(), "bg".to_owned()),
+            ("mode_nested_active".to_owned(), "active".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_ascended: Some(true),
+            session_ancestry: vec!["host-session".to_owned()],
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "bg");
     }
 }

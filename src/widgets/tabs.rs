@@ -29,6 +29,9 @@ pub struct TabsWidget {
     tab_truncate_start_format: Vec<FormattedPart>,
     tab_truncate_end_format: Vec<FormattedPart>,
     tab_zero_based_index: bool,
+    nested_ascended_format: Vec<FormattedPart>,
+    nested_dimmed_format: Vec<FormattedPart>,
+    nested_active_format: Vec<FormattedPart>,
 }
 
 impl TabsWidget {
@@ -106,6 +109,30 @@ impl TabsWidget {
             .cloned()
             .or_else(|| bell_indicator.clone());
 
+        let nested_ascended_format = FormattedPart::multiple_from_format_string(
+            config
+                .get("tab_nested_ascended")
+                .map(|s| s.as_str())
+                .unwrap_or("{tab}"),
+            config,
+        );
+
+        let nested_dimmed_format = FormattedPart::multiple_from_format_string(
+            config
+                .get("tab_nested_dimmed")
+                .map(|s| s.as_str())
+                .unwrap_or("{tab}"),
+            config,
+        );
+
+        let nested_active_format = FormattedPart::multiple_from_format_string(
+            config
+                .get("tab_nested_active")
+                .map(|s| s.as_str())
+                .unwrap_or("{tab}"),
+            config,
+        );
+
         Self {
             normal_tab_format,
             normal_tab_fullscreen_format,
@@ -126,6 +153,9 @@ impl TabsWidget {
             tab_truncate_start_format,
             tab_truncate_end_format,
             tab_zero_based_index,
+            nested_ascended_format,
+            nested_dimmed_format,
+            nested_active_format,
         }
     }
 }
@@ -296,20 +326,60 @@ impl TabsWidget {
         &self.normal_tab_format
     }
 
+    fn nested_format_for(&self, mode: &ModeInfo) -> Option<&Vec<FormattedPart>> {
+        if mode.session_ascended.unwrap_or(false) {
+            Some(&self.nested_ascended_format)
+        } else if mode.session_dimmed.unwrap_or(false) {
+            Some(&self.nested_dimmed_format)
+        } else if !mode.session_ancestry.is_empty() {
+            Some(&self.nested_active_format)
+        } else {
+            None
+        }
+    }
+
     fn render_tab(&self, tab: &TabInfo, panes: &PaneManifest, mode: &ModeInfo) -> String {
+        let tab_name = match mode.mode {
+            InputMode::RenameTab => match tab.name.is_empty() {
+                true => "Enter name...",
+                false => tab.name.as_str(),
+            },
+            _name => tab.name.as_str(),
+        };
+
+        let tab_rendered = self.render_tab_format(tab, panes, mode, tab_name);
+
+        let Some(nested_format) = self.nested_format_for(mode) else {
+            return tab_rendered;
+        };
+
+        nested_format.iter().fold("".to_owned(), |acc, f| {
+            let mut content = f.content.clone();
+
+            if content.contains("{tab}") {
+                content = content.replace("{tab}", &tab_rendered);
+            }
+
+            if content.contains("{name}") {
+                content = content.replace("{name}", tab_name);
+            }
+
+            format!("{acc}{}", f.format_string(&content))
+        })
+    }
+
+    fn render_tab_format(
+        &self,
+        tab: &TabInfo,
+        panes: &PaneManifest,
+        mode: &ModeInfo,
+        tab_name: &str,
+    ) -> String {
         let formatters = self.select_format(tab, mode);
         let mut output = "".to_owned();
 
         for f in formatters.iter() {
             let mut content = f.content.clone();
-
-            let tab_name = match mode.mode {
-                InputMode::RenameTab => match tab.name.is_empty() {
-                    true => "Enter name...",
-                    false => tab.name.as_str(),
-                },
-                _name => tab.name.as_str(),
-            };
 
             if content.contains("{name}") {
                 content = content.replace("{name}", tab_name);
@@ -838,5 +908,152 @@ mod test {
         let res = get_tab_window(&tabs, max_count);
 
         assert_eq!(res, expected);
+    }
+
+    mod nested {
+        use std::collections::BTreeMap;
+
+        use zellij_tile::prelude::{ModeInfo, TabInfo};
+
+        use crate::{config::ZellijState, widgets::widget::Widget};
+
+        use super::super::TabsWidget;
+
+        fn state_with(mode: ModeInfo) -> ZellijState {
+            ZellijState {
+                mode,
+                tabs: vec![TabInfo {
+                    active: true,
+                    name: "one".to_owned(),
+                    ..TabInfo::default()
+                }],
+                ..ZellijState::default()
+            }
+        }
+
+        #[test]
+        pub fn test_defaults_to_tab_placeholder_when_unconfigured() {
+            let config = BTreeMap::from([("tab_active".to_owned(), "{name}".to_owned())]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "one");
+        }
+
+        #[test]
+        pub fn test_regular_format_used_when_not_nested() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_ascended".to_owned(), "(bg) {tab}".to_owned()),
+                ("tab_nested_dimmed".to_owned(), "(dim) {tab}".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo::default());
+
+            assert_eq!(widget.process("tabs", &state), "one");
+        }
+
+        #[test]
+        pub fn test_nested_ascended_wraps_whole_tab_format() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_ascended".to_owned(), "(bg) {tab}".to_owned()),
+                ("tab_nested_dimmed".to_owned(), "(dim) {tab}".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_ascended: Some(true),
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "(bg) one");
+        }
+
+        #[test]
+        pub fn test_nested_dimmed_wraps_whole_tab_format() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_ascended".to_owned(), "(bg) {tab}".to_owned()),
+                ("tab_nested_dimmed".to_owned(), "(dim) {tab}".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "(dim) one");
+        }
+
+        #[test]
+        pub fn test_nested_active_used_when_ancestry_present() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_active".to_owned(), "(active) {tab}".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_ancestry: vec!["host-session".to_owned()],
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "(active) one");
+        }
+
+        #[test]
+        pub fn test_nested_active_not_used_without_ancestry() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_active".to_owned(), "(active) {tab}".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo::default());
+
+            assert_eq!(widget.process("tabs", &state), "one");
+        }
+
+        #[test]
+        pub fn test_nested_ascended_takes_precedence_over_dimmed_and_active() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_ascended".to_owned(), "bg".to_owned()),
+                ("tab_nested_dimmed".to_owned(), "dim".to_owned()),
+                ("tab_nested_active".to_owned(), "active".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_ascended: Some(true),
+                session_ancestry: vec!["host-session".to_owned()],
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "bg");
+        }
+
+        #[test]
+        pub fn test_nested_name_placeholder_uses_plain_tab_name() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "#[fg=1]{name}".to_owned()),
+                ("tab_nested_dimmed".to_owned(), "{name}!".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "one!");
+        }
     }
 }

@@ -180,6 +180,8 @@ impl ModuleConfig {
         let click_pos = match mouse {
             Mouse::ScrollUp(_) => return,
             Mouse::ScrollDown(_) => return,
+            Mouse::ScrollLeft(_) => return,
+            Mouse::ScrollRight(_) => return,
             Mouse::LeftClick(_, y) => y,
             Mouse::RightClick(_, y) => y,
             Mouse::Hold(_, y) => y,

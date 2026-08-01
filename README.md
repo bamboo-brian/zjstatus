@@ -139,6 +139,10 @@ layout {
                 mode_normal  "#[bg=blue] "
                 mode_tmux    "#[bg=#ffc387] "
 
+                mode_nested_ascended "#[fg=#f9e2af,bold] 󰚌 {mode} "
+                mode_nested_dimmed   "#[fg=#f9e2af,bold] 󰆼 {mode} "
+                mode_nested_active   "#[fg=#a6e3a1,bold] 󰆧 {mode} "
+
                 tab_normal   "#[fg=#6C7086] {name} "
                 tab_active   "#[fg=#9399B2,bold,italic] {name} "
 
