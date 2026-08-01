@@ -25,7 +25,7 @@ bench = []
 tracing = []
 
 [dependencies]
-zellij-tile = "0.44.3"
+zellij-tile = { git = "https://github.com/zellij-org/zellij", rev = "0e6e4404027a187f1399a43bf91bdbd13d9636e1" }
 chrono = { version = "0.4.43", default-features = false, features = ["clock"] }
 regex = "1.12.2"
 chrono-tz = "0.10.4"

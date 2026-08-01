@@ -124,7 +124,7 @@ layout {
         children
         pane size=1 borderless=true {
             plugin location="https://github.com/dj95/zjstatus/releases/latest/download/zjstatus.wasm" {
-                format_left   "{mode} #[fg=#89B4FA,bold]{session}"
+                format_left   "{mode} #[fg=#89B4FA,bold]{session} {ancestry}"
                 format_center "{tabs}"
                 format_right  "{command_git_branch} {datetime}"
                 format_space  ""
@@ -138,6 +138,13 @@ layout {
 
                 mode_normal  "#[bg=blue] "
                 mode_tmux    "#[bg=#ffc387] "
+
+                mode_nested_ascended "#[fg=#f9e2af,bold] 󰚌 {mode} "
+                mode_nested_dimmed   "#[fg=#f9e2af,bold] 󰆼 {mode} "
+                mode_nested_active   "#[fg=#a6e3a1,bold] 󰆧 {mode} "
+
+                ancestry_format    "#[fg=#6C7086]{name}"
+                ancestry_separator " › "
 
                 tab_normal   "#[fg=#6C7086] {name} "
                 tab_active   "#[fg=#9399B2,bold,italic] {name} "

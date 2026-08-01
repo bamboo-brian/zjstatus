@@ -67,6 +67,7 @@ pub fn event_mask_from_widget_name(name: &str) -> u8 {
         "swap_layout" => UpdateEventMask::Tab as u8,
         "tabs" => UpdateEventMask::Tab as u8,
         "pipe" => UpdateEventMask::Always as u8,
+        "ancestry" => UpdateEventMask::Mode as u8,
         _ => UpdateEventMask::None as u8,
     }
 }
@@ -180,6 +181,8 @@ impl ModuleConfig {
         let click_pos = match mouse {
             Mouse::ScrollUp(_) => return,
             Mouse::ScrollDown(_) => return,
+            Mouse::ScrollLeft(_) => return,
+            Mouse::ScrollRight(_) => return,
             Mouse::LeftClick(_, y) => y,
             Mouse::RightClick(_, y) => y,
             Mouse::Hold(_, y) => y,

@@ -8,6 +8,7 @@ use zjstatus::{
     config::{self, ModuleConfig, UpdateEventMask, ZellijState},
     frames, pipe,
     widgets::{
+        ancestry::AncestryWidget,
         command::{CommandResult, CommandWidget},
         datetime::DateTimeWidget,
         mode::ModeWidget,
@@ -413,6 +414,10 @@ fn register_widgets(configuration: &BTreeMap<String, String>) -> BTreeMap<String
     widget_map.insert(
         "notifications".to_owned(),
         Arc::new(NotificationWidget::new(configuration)),
+    );
+    widget_map.insert(
+        "ancestry".to_owned(),
+        Arc::new(AncestryWidget::new(configuration)),
     );
 
     tracing::debug!("registered widgets: {:?}", widget_map.keys());
