@@ -67,6 +67,7 @@ pub fn event_mask_from_widget_name(name: &str) -> u8 {
         "swap_layout" => UpdateEventMask::Tab as u8,
         "tabs" => UpdateEventMask::Tab as u8,
         "pipe" => UpdateEventMask::Always as u8,
+        "ancestry" => UpdateEventMask::Mode as u8,
         _ => UpdateEventMask::None as u8,
     }
 }
