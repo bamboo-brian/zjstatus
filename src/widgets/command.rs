@@ -14,7 +14,10 @@ use zellij_tile::shim::{run_command, run_command_with_env_variables_and_cwd};
 
 use crate::render::{FormattedPart, formatted_parts_from_string_cached};
 
-use crate::{config::ZellijState, widgets::widget::Widget};
+use crate::{
+    config::ZellijState,
+    widgets::widget::{Widget, should_hide_when_nested},
+};
 
 pub const TIMESTAMP_FORMAT: &str = "%s";
 
@@ -42,6 +45,7 @@ struct CommandConfig {
     render_mode: RenderMode,
     click_action: String,
     hide_on_empty_stdout: bool,
+    nested_show: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -85,6 +89,10 @@ impl Widget for CommandWidget {
         };
 
         if command_config.hide_on_empty_stdout && command_result.stdout.is_empty() {
+            return "".to_owned();
+        }
+
+        if should_hide_when_nested(command_config.nested_show, &state.mode) {
             return "".to_owned();
         }
 
@@ -265,6 +273,7 @@ fn parse_config(zj_conf: &BTreeMap<String, String>) -> BTreeMap<String, CommandC
             render_mode: RenderMode::Static,
             click_action: "".to_owned(),
             hide_on_empty_stdout: false,
+            nested_show: true,
         };
 
         if let Some(existing_conf) = config.get(command_name.as_str()) {
@@ -331,6 +340,13 @@ fn parse_config(zj_conf: &BTreeMap<String, String>) -> BTreeMap<String, CommandC
             command_conf.hide_on_empty_stdout = match zj_conf.get(&key) {
                 Some(val) => val == "true",
                 None => false,
+            };
+        }
+
+        if key.ends_with("nestedshow") {
+            command_conf.nested_show = match zj_conf.get(&key) {
+                Some(val) => val == "true",
+                None => true,
             };
         }
 
@@ -467,6 +483,53 @@ fn commandline_parser(input: &str) -> Vec<String> {
 mod test {
     use super::*;
     use rstest::rstest;
+    use zellij_tile::prelude::ModeInfo;
+
+    fn nested_state_with_result() -> ZellijState {
+        ZellijState {
+            mode: ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            },
+            command_results: BTreeMap::from([(
+                "command_test".to_owned(),
+                CommandResult {
+                    stdout: "hello".to_owned(),
+                    ..CommandResult::default()
+                },
+            )]),
+            ..ZellijState::default()
+        }
+    }
+
+    #[test]
+    pub fn test_hidden_when_nested_and_nested_show_false() {
+        let config = BTreeMap::from([
+            ("command_test_command".to_owned(), "echo hello".to_owned()),
+            ("command_test_format".to_owned(), "{stdout}".to_owned()),
+            ("command_test_nestedshow".to_owned(), "false".to_owned()),
+        ]);
+        let widget = CommandWidget::new(&config);
+
+        assert_eq!(
+            widget.process("command_test", &nested_state_with_result()),
+            ""
+        );
+    }
+
+    #[test]
+    pub fn test_shown_by_default_when_nested() {
+        let config = BTreeMap::from([
+            ("command_test_command".to_owned(), "echo hello".to_owned()),
+            ("command_test_format".to_owned(), "{stdout}".to_owned()),
+        ]);
+        let widget = CommandWidget::new(&config);
+
+        assert_eq!(
+            widget.process("command_test", &nested_state_with_result()),
+            "hello"
+        );
+    }
 
     #[test]
     pub fn test_focused_pane_cwd_parsing() {
@@ -526,6 +589,7 @@ mod test {
             render_mode: RenderMode::Static,
             click_action: "".to_owned(),
             hide_on_empty_stdout: false,
+            nested_show: true,
         };
 
         release_command_lock(&state, "test_release");
@@ -603,6 +667,7 @@ mod test {
                 render_mode: RenderMode::Static,
                 click_action: "".to_owned(),
                 hide_on_empty_stdout: false,
+                nested_show: true,
             },
             "test",
             state,

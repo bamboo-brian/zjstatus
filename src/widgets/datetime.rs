@@ -5,7 +5,10 @@ use chrono_tz::Tz;
 
 use crate::render::FormattedPart;
 
-use crate::{config::ZellijState, widgets::widget::Widget};
+use crate::{
+    config::ZellijState,
+    widgets::widget::{Widget, should_hide_when_nested},
+};
 
 pub struct DateTimeWidget {
     format: String,
@@ -13,6 +16,7 @@ pub struct DateTimeWidget {
     date_format: String,
     color_format: Vec<FormattedPart>,
     time_zone: Option<Tz>,
+    nested_show: bool,
 }
 
 impl DateTimeWidget {
@@ -44,18 +48,28 @@ impl DateTimeWidget {
             color_format = form;
         }
 
+        let nested_show = config
+            .get("datetime_nested_show")
+            .map(|v| v == "true")
+            .unwrap_or(true);
+
         Self {
             format: format.to_owned(),
             date_format: date_format.to_owned(),
             time_format: time_format.to_owned(),
             color_format: FormattedPart::multiple_from_format_string(color_format, config),
             time_zone,
+            nested_show,
         }
     }
 }
 
 impl Widget for DateTimeWidget {
-    fn process(&self, _name: &str, _state: &ZellijState) -> String {
+    fn process(&self, _name: &str, state: &ZellijState) -> String {
+        if should_hide_when_nested(self.nested_show, &state.mode) {
+            return "".to_owned();
+        }
+
         let date = Local::now();
 
         let mut tz = Tz::UTC;
@@ -106,4 +120,66 @@ impl Widget for DateTimeWidget {
     }
 
     fn process_click(&self, _name: &str, _state: &ZellijState, _pos: usize) {}
+}
+
+#[cfg(test)]
+mod test {
+    use zellij_tile::prelude::ModeInfo;
+
+    use super::*;
+
+    #[test]
+    fn test_hidden_when_nested_and_nested_show_false() {
+        let config = BTreeMap::from([
+            ("datetime".to_owned(), "{time}".to_owned()),
+            ("datetime_nested_show".to_owned(), "false".to_owned()),
+        ]);
+        let widget = DateTimeWidget::new(&config);
+
+        let state = ZellijState {
+            mode: ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            },
+            ..ZellijState::default()
+        };
+
+        assert_eq!(widget.process("datetime", &state), "");
+    }
+
+    #[test]
+    fn test_shown_by_default_when_nested() {
+        let config = BTreeMap::from([("datetime".to_owned(), "{time}".to_owned())]);
+        let widget = DateTimeWidget::new(&config);
+
+        let state = ZellijState {
+            mode: ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            },
+            ..ZellijState::default()
+        };
+
+        assert_ne!(widget.process("datetime", &state), "");
+    }
+
+    #[test]
+    fn test_shown_when_host_fullscreen_despite_nested_show_false() {
+        let config = BTreeMap::from([
+            ("datetime".to_owned(), "{time}".to_owned()),
+            ("datetime_nested_show".to_owned(), "false".to_owned()),
+        ]);
+        let widget = DateTimeWidget::new(&config);
+
+        let state = ZellijState {
+            mode: ModeInfo {
+                session_dimmed: Some(true),
+                host_fullscreen: Some(true),
+                ..ModeInfo::default()
+            },
+            ..ZellijState::default()
+        };
+
+        assert_ne!(widget.process("datetime", &state), "");
+    }
 }

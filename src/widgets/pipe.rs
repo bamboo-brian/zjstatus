@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::render::{FormattedPart, formatted_parts_from_string_cached};
 
-use super::widget::Widget;
+use super::widget::{Widget, should_hide_when_nested};
 
 lazy_static! {
     static ref PIPE_REGEX: Regex = Regex::new("_[a-zA-Z0-9]+$").unwrap();
@@ -26,6 +26,7 @@ pub struct PipeWidget {
 struct PipeConfig {
     format: Vec<FormattedPart>,
     render_mode: RenderMode,
+    nested_show: bool,
 }
 
 impl PipeWidget {
@@ -54,6 +55,10 @@ impl Widget for PipeWidget {
                 return "".to_owned();
             }
         };
+
+        if should_hide_when_nested(pipe_config.nested_show, &state.mode) {
+            return "".to_owned();
+        }
 
         let content = pipe_config
             .format
@@ -111,6 +116,7 @@ fn parse_config(zj_conf: &BTreeMap<String, String>) -> BTreeMap<String, PipeConf
         let mut pipe_conf = PipeConfig {
             format: vec![],
             render_mode: RenderMode::Static,
+            nested_show: true,
         };
 
         if let Some(existing_conf) = config.get(pipe_name.as_str()) {
@@ -134,7 +140,58 @@ fn parse_config(zj_conf: &BTreeMap<String, String>) -> BTreeMap<String, PipeConf
             };
         }
 
+        if key.ends_with("nestedshow") {
+            pipe_conf.nested_show = match zj_conf.get(&key) {
+                Some(val) => val == "true",
+                None => true,
+            };
+        }
+
         config.insert(pipe_name, pipe_conf);
     }
     config
+}
+
+#[cfg(test)]
+mod test {
+    use zellij_tile::prelude::ModeInfo;
+
+    use super::*;
+    use crate::config::ZellijState;
+
+    fn nested_state_with_result() -> ZellijState {
+        ZellijState {
+            mode: ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            },
+            pipe_results: BTreeMap::from([("pipe_test".to_owned(), "hello".to_owned())]),
+            ..ZellijState::default()
+        }
+    }
+
+    #[test]
+    fn test_hidden_when_nested_and_nested_show_false() {
+        let config = BTreeMap::from([
+            ("pipe_test_format".to_owned(), "{output}".to_owned()),
+            ("pipe_test_nestedshow".to_owned(), "false".to_owned()),
+        ]);
+        let widget = PipeWidget::new(&config);
+
+        assert_eq!(
+            widget.process("pipe_test", &nested_state_with_result()),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_shown_by_default_when_nested() {
+        let config = BTreeMap::from([("pipe_test_format".to_owned(), "{output}".to_owned())]);
+        let widget = PipeWidget::new(&config);
+
+        assert_eq!(
+            widget.process("pipe_test", &nested_state_with_result()),
+            "hello"
+        );
+    }
 }

@@ -7,7 +7,7 @@ use zellij_tile::{
 
 use crate::{config::ZellijState, render::FormattedPart};
 
-use super::widget::Widget;
+use super::widget::{Widget, should_hide_when_nested};
 
 pub struct TabsWidget {
     active_tab_format: Vec<FormattedPart>,
@@ -32,6 +32,7 @@ pub struct TabsWidget {
     nested_ascended_format: Vec<FormattedPart>,
     nested_dimmed_format: Vec<FormattedPart>,
     nested_active_format: Vec<FormattedPart>,
+    nested_show: bool,
 }
 
 impl TabsWidget {
@@ -133,6 +134,11 @@ impl TabsWidget {
             config,
         );
 
+        let nested_show = config
+            .get("tab_nested_show")
+            .map(|v| v == "true")
+            .unwrap_or(true);
+
         Self {
             normal_tab_format,
             normal_tab_fullscreen_format,
@@ -156,12 +162,17 @@ impl TabsWidget {
             nested_ascended_format,
             nested_dimmed_format,
             nested_active_format,
+            nested_show,
         }
     }
 }
 
 impl Widget for TabsWidget {
     fn process(&self, _name: &str, state: &ZellijState) -> String {
+        if should_hide_when_nested(self.nested_show, &state.mode) {
+            return "".to_owned();
+        }
+
         let mut output = "".to_owned();
         let mut counter = 0;
 
@@ -1054,6 +1065,39 @@ mod test {
             });
 
             assert_eq!(widget.process("tabs", &state), "one!");
+        }
+
+        #[test]
+        pub fn test_hidden_when_nested_and_nested_show_false() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_show".to_owned(), "false".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_dimmed: Some(true),
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "");
+        }
+
+        #[test]
+        pub fn test_shown_when_host_fullscreen_despite_nested_show_false() {
+            let config = BTreeMap::from([
+                ("tab_active".to_owned(), "{name}".to_owned()),
+                ("tab_nested_show".to_owned(), "false".to_owned()),
+            ]);
+            let widget = TabsWidget::new(&config);
+
+            let state = state_with(ModeInfo {
+                session_dimmed: Some(true),
+                host_fullscreen: Some(true),
+                ..ModeInfo::default()
+            });
+
+            assert_eq!(widget.process("tabs", &state), "one");
         }
     }
 }

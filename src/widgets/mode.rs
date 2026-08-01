@@ -4,7 +4,7 @@ use zellij_tile::prelude::InputMode;
 
 use crate::{config::ZellijState, render::FormattedPart};
 
-use super::widget::Widget;
+use super::widget::{Widget, should_hide_when_nested};
 
 #[derive(Debug)]
 pub struct ModeWidget {
@@ -26,6 +26,7 @@ pub struct ModeWidget {
     nested_ascended_format: Vec<FormattedPart>,
     nested_dimmed_format: Vec<FormattedPart>,
     nested_active_format: Vec<FormattedPart>,
+    nested_show: bool,
 }
 
 impl ModeWidget {
@@ -117,6 +118,11 @@ impl ModeWidget {
             None => vec![],
         };
 
+        let nested_show = config
+            .get("mode_nested_show")
+            .map(|v| v == "true")
+            .unwrap_or(true);
+
         Self {
             normal_format,
             locked_format,
@@ -136,6 +142,7 @@ impl ModeWidget {
             nested_ascended_format,
             nested_dimmed_format,
             nested_active_format,
+            nested_show,
         }
     }
 
@@ -175,6 +182,10 @@ impl ModeWidget {
 
 impl Widget for ModeWidget {
     fn process(&self, _name: &str, state: &ZellijState) -> String {
+        if should_hide_when_nested(self.nested_show, &state.mode) {
+            return "".to_owned();
+        }
+
         let mode_name = format!("{:?}", state.mode.mode);
         let regular_format = self.render_regular_format(state, &mode_name);
 
@@ -476,5 +487,38 @@ mod test {
         });
 
         assert_eq!(widget.process("mode", &state), "bg");
+    }
+
+    #[test]
+    pub fn test_hidden_when_nested_and_nested_show_false() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_show".to_owned(), "false".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "");
+    }
+
+    #[test]
+    pub fn test_shown_when_host_fullscreen_despite_nested_show_false() {
+        let config = BTreeMap::from([
+            ("mode_normal".to_owned(), "{name}".to_owned()),
+            ("mode_nested_show".to_owned(), "false".to_owned()),
+        ]);
+        let widget = ModeWidget::new(&config);
+
+        let state = state_with_mode(ModeInfo {
+            session_dimmed: Some(true),
+            host_fullscreen: Some(true),
+            ..ModeInfo::default()
+        });
+
+        assert_eq!(widget.process("mode", &state), "Normal");
     }
 }
