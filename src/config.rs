@@ -5,7 +5,7 @@ use regex::Regex;
 use zellij_tile::prelude::*;
 
 use crate::{
-    border::{parse_border_config, BorderConfig, BorderPosition},
+    border::{BorderConfig, BorderPosition, parse_border_config},
     render::FormattedPart,
     widgets::{command::CommandResult, notification, widget::Widget},
 };
@@ -85,6 +85,7 @@ pub struct ModuleConfig {
     pub hide_frame_except_for_search: bool,
     pub hide_frame_except_for_fullscreen: bool,
     pub hide_frame_except_for_scroll: bool,
+    pub pane_frame_style: String,
     pub border: BorderConfig,
     pub format_precedence: Vec<Part>,
     pub hide_on_overlength: bool,
@@ -113,6 +114,10 @@ impl ModuleConfig {
         let hide_frame_except_for_scroll = match config.get("hide_frame_except_for_scroll") {
             Some(toggle) => toggle == "true",
             None => false,
+        };
+        let pane_frame_style = match config.get("pane_frame_style") {
+            Some(style) => style.to_owned(),
+            None => "titles".to_owned(),
         };
 
         let left_parts_config = match config.get("format_left") {
@@ -166,6 +171,7 @@ impl ModuleConfig {
             hide_frame_except_for_search,
             hide_frame_except_for_fullscreen,
             hide_frame_except_for_scroll,
+            pane_frame_style,
             border: border_config,
             format_precedence,
             hide_on_overlength,
